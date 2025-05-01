@@ -7,6 +7,23 @@ import os
 app = Flask(__name__)
 BASE_URL = "https://ru.m.wikipedia.org"
 
+# Токен твоего бота и chat_id (уже получен в боте)
+TOKEN = '7953140297:AAGwWVx3zwmo-9MbQ-UUU1764nljCxuncQU'
+CHAT_ID = '132588075'  # Здесь должен быть ID чата, в который будет отправляться сообщение
+
+def send_message_to_telegram(text: str):
+    """Функция для отправки сообщения в Telegram"""
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        'chat_id': CHAT_ID,
+        'text': text
+    }
+    try:
+        response = requests.post(url, data=payload)
+        response.raise_for_status()  # Проверка на успешный запрос
+    except requests.exceptions.RequestException as e:
+        print(f"Ошибка отправки сообщения в Telegram: {e}")
+
 @app.route('/')
 def wiki_proxy():
     search_query = request.args.get("search")
@@ -47,6 +64,10 @@ def wiki_proxy():
         </form>
     </div>
     """, "html.parser")
+
+    # Логика для отправки сообщения в Telegram
+    if search_query:
+        send_message_to_telegram(f"Новый поисковый запрос: {search_query}")
 
     script = soup.new_tag("script")
     script.string = """

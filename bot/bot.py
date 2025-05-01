@@ -4,8 +4,10 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # Токен твоего бота
 TOKEN = '7953140297:AAGwWVx3zwmo-9MbQ-UUU1764nljCxuncQU'
 
+
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    print("Chat ID:", update.effective_chat.id)
     await update.message.reply_text('Привет!')
 
 def main():

@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+BOT_TOKEN = '7953140297:AAGwWVx3zwmo-9MbQ-UUU1764nljCxuncQU'
 BASE_SITE_URL = 'https://wikimagic.onrender.com'
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

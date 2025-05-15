@@ -5,7 +5,13 @@ from datetime import datetime, timedelta
 from threading import Lock
 import os
 
-app = Flask(__name__)
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(BASE_DIR, 'templates'),
+    static_folder=os.path.join(BASE_DIR, 'static')
+)
 
 # Хранилище сбросов
 active_resets = {}

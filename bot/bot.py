@@ -1,5 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 import logging
 from datetime import datetime, timedelta
 from threading import Lock
@@ -50,12 +50,39 @@ async def reset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
     )
 
+async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    code = update.message.text.strip()
+    
+    if not code.isdigit() or len(code) != 4:
+        await update.message.reply_text("Пожалуйста, введите 4-значный код.")
+        return
+    
+    ref_link = f"https://wikimagic.onrender.com/?ref={user_id}"  # URL основного сайта
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://wiki-clone-su5x.onrender.com/update_code",
+            json={'code': code, 'new_url': ref_link}
+        ) as response:
+            result = await response.json()
+            
+            if result.get('status') == 'success':
+                await update.message.reply_text(
+                    "✅ Код принят! Теперь пользователь будет перенаправлен на вашу ссылку.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔗 Перейти на сайт", url=ref_link)]
+                    ])
+                )
+            else:
+                await update.message.reply_text("❌ Код не найден или устарел.")
+
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(reset_callback, pattern="^reset$"))
-    
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_code))
     
     application.run_polling(drop_pending_updates=True)
 
